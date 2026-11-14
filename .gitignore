@@ -1,0 +1,30 @@
+# Markdown policy: README.md is the ONLY Markdown file allowed in this repository
+*.md
+*.markdown
+*.mdx
+!/README.md
+
+# Local Claude Code configuration/skills live outside this repository
+.claude/
+
+# Secrets and environment
+.env
+.env.*
+!.env.example
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Build output and dependencies
+node_modules/
+target/
+build/
+dist/
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.log
