@@ -1,0 +1,23 @@
+# Configuration is environment-based. Secrets are never stored here.
+spring:
+  application:
+    name: nexora-backend
+  autoconfigure:
+    # Flyway needs a datasource; keep both off until a database connection and a first migration exist.
+    exclude: org.springframework.boot.jdbc.autoconfigure.DataSourceAutoConfiguration
+  threads:
+    virtual:
+      enabled: true
+
+server:
+  # Loopback by default; override only when running in a container.
+  address: ${NEXORA_BACKEND_HOST:127.0.0.1}
+  port: ${NEXORA_BACKEND_PORT:8080}
+
+nexora:
+  ai-service:
+    # Internal Java -> Python base URL. The Python service is internal-only.
+    url: ${NEXORA_AI_SERVICE_URL:http://127.0.0.1:8000}
+  internal:
+    # Shared secret for Java -> Python calls. No default on purpose.
+    shared-secret: ${NEXORA_INTERNAL_SHARED_SECRET:}

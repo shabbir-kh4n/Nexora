@@ -28,3 +28,9 @@ __pycache__/
 .venv/
 venv/
 *.log
+
+# Python / TypeScript tool caches
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+*.tsbuildinfo
