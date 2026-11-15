@@ -59,6 +59,7 @@ class RunControllerTests {
         FAKE.script(FakeAiService::completeRun);
         FAKE.sent.clear();
         FAKE.requests.set(0);
+        FAKE.cancels.clear();
     }
 
     private HttpRequest post(String body, String accept) {
@@ -110,6 +111,83 @@ class RunControllerTests {
     void theBrowserStreamTimeoutIsFourMinutesAndOutlastsTheRunDeadline() {
         assertThat(RunController.EMITTER_TIMEOUT).isEqualTo(Duration.ofMinutes(4));
         assertThat(RunController.EMITTER_TIMEOUT).isGreaterThan(properties.run().maxDuration());
+    }
+
+    private HttpResponse<String> send(String method, String path) throws Exception {
+        HttpRequest.Builder request = HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port + path));
+        request = method.equals("GET") ? request.GET() : request.POST(HttpRequest.BodyPublishers.noBody());
+        return HTTP.send(request.build(), HttpResponse.BodyHandlers.ofString());
+    }
+
+    @Test
+    void aFinishedRunIsReadableAsASnapshotAndCancellingItChangesNothing() throws Exception {
+        HttpResponse<String> stream =
+                HTTP.send(post("{\"question\":\"q\"}", "text/event-stream"), HttpResponse.BodyHandlers.ofString());
+        UUID runId = runIdOf(parse(stream.body()).get(0));
+        RunHarness.awaitTerminal(registry.find(runId).orElseThrow());
+
+        HttpResponse<String> get = send("GET", "/api/v1/runs/" + runId);
+        HttpResponse<String> cancel = send("POST", "/api/v1/runs/" + runId + "/cancel");
+
+        assertThat(get.statusCode()).isEqualTo(200);
+        assertThat(get.headers().firstValue("Content-Type").orElse("")).startsWith("application/json");
+        JsonNode body = mapper.readTree(get.body());
+        assertThat(body.get("run_id").stringValue()).isEqualTo(runId.toString());
+        assertThat(body.get("status").stringValue()).isEqualTo("COMPLETED");
+        assertThat(body.get("output").stringValue()).isEqualTo("This is a simulated answer.");
+        assertThat(body.get("steps")).hasSize(2);
+        assertThat(body.has("error")).isFalse();
+        assertThat(cancel.statusCode()).isEqualTo(200);
+        assertThat(cancel.body()).isEqualTo(get.body());
+        assertThat(FAKE.cancels).isEmpty();
+    }
+
+    @Test
+    void cancellingARunningRunOverHttpReturnsTheCancelledSnapshotAndEndsTheStream() throws Exception {
+        FAKE.script(call -> {
+            call.startStream();
+            call.step("first");
+            call.token("partial");
+            call.waitForClientToClose(Duration.ofSeconds(15));
+        });
+        HttpResponse<InputStream> stream =
+                HTTP.send(post("{\"question\":\"q\"}", "text/event-stream"), HttpResponse.BodyHandlers.ofInputStream());
+        UUID runId = runIdOf(readFirstFrame(stream.body()));
+        await().atMost(Duration.ofSeconds(10)).until(
+                () -> registry.find(runId).orElseThrow().snapshot().output().equals("partial"));
+
+        HttpResponse<String> cancel = send("POST", "/api/v1/runs/" + runId + "/cancel");
+        HttpResponse<String> again = send("POST", "/api/v1/runs/" + runId + "/cancel");
+
+        JsonNode body = mapper.readTree(cancel.body());
+        assertThat(cancel.statusCode()).isEqualTo(200);
+        assertThat(body.get("status").stringValue()).isEqualTo("CANCELLED");
+        assertThat(body.get("output").stringValue()).isEqualTo("partial");
+        assertThat(again.body()).isEqualTo(cancel.body());
+        // The first frame was consumed above; what remains is the token, and no terminal event follows.
+        assertThat(parse(new String(stream.body().readAllBytes(), StandardCharsets.UTF_8)))
+                .extracting(SseParser.Frame::event).containsExactly("token");
+        await().atMost(Duration.ofSeconds(10)).until(() -> FAKE.cancels.size() == 1);
+        assertThat(FAKE.cancels).containsExactly(runId.toString());
+    }
+
+    @Test
+    void anUnknownRunIs404AndAMalformedIdIs400WithTheErrorEnvelope() throws Exception {
+        String unknown = "/api/v1/runs/3f2b8c1e-5d4a-4c7e-9b1a-2e6f0a8d7c11";
+        String notFound = "{\"error\":{\"code\":\"RUN_NOT_FOUND\",\"message\":\""
+                + ErrorCode.RUN_NOT_FOUND.message() + "\"}}";
+        String invalid = "{\"error\":{\"code\":\"INVALID_REQUEST\",\"message\":\"The request is invalid.\"}}";
+
+        for (HttpResponse<String> response : List.of(send("GET", unknown), send("POST", unknown + "/cancel"))) {
+            assertThat(response.statusCode()).isEqualTo(404);
+            assertThat(response.body()).isEqualTo(notFound);
+        }
+        for (HttpResponse<String> response : List.of(
+                send("GET", "/api/v1/runs/not-a-uuid"), send("POST", "/api/v1/runs/NOT-A-UUID/cancel"))) {
+            assertThat(response.statusCode()).isEqualTo(400);
+            assertThat(response.body()).isEqualTo(invalid);
+        }
+        assertThat(FAKE.cancels).isEmpty();
     }
 
     @Test

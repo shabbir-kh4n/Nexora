@@ -54,6 +54,34 @@ class AiServiceClientTests {
     }
 
     @Test
+    void cancelPostsToTheRunsCancelPathWithTheSecret() {
+        try (FakeAiService fake = new FakeAiService(TestSupport.SECRET, FakeAiService::completeRun)) {
+            client(fake.uri(), TestSupport.SECRET).cancel(RUN_ID);
+
+            assertThat(fake.cancels).containsExactly(RUN_ID.toString());
+            assertThat(fake.requests).hasValue(0);
+        }
+    }
+
+    @ParameterizedTest
+    @CsvSource({"401,INTERNAL_AUTH_FAILED", "400,INTERNAL_ERROR", "404,UPSTREAM_UNAVAILABLE", "500,UPSTREAM_UNAVAILABLE"})
+    void aRejectedCancelIsMappedToAnUpstreamError(int status, ErrorCode expected) {
+        try (FakeAiService fake = new FakeAiService(TestSupport.SECRET, FakeAiService::completeRun)) {
+            fake.cancelStatus = status;
+
+            assertThatThrownBy(() -> client(fake.uri(), TestSupport.SECRET).cancel(RUN_ID))
+                    .isInstanceOfSatisfying(UpstreamException.class, e -> assertThat(e.code()).isEqualTo(expected));
+        }
+    }
+
+    @Test
+    void cancelAgainstAnUnreachableServiceIsUnavailable() {
+        assertThatThrownBy(() -> client(TestSupport.closedPortUri(), TestSupport.SECRET).cancel(RUN_ID))
+                .isInstanceOfSatisfying(UpstreamException.class,
+                        e -> assertThat(e.code()).isEqualTo(ErrorCode.UPSTREAM_UNAVAILABLE));
+    }
+
+    @Test
     void theConfiguredConnectionTimeoutIsTheOneTheHttpClientUses() {
         NexoraProperties properties = new NexoraProperties(
                 new NexoraProperties.AiService(URI.create("http://127.0.0.1:8000"), Duration.ofMillis(1234)),

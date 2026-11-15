@@ -39,6 +39,8 @@ final class FakeAiService implements AutoCloseable {
     volatile String lastBody;
     volatile String lastContentType;
     volatile String lastAccept;
+    final List<String> cancels = new CopyOnWriteArrayList<>();
+    volatile int cancelStatus = 204;
 
     FakeAiService(String expectedSecret, Script script) {
         this.expectedSecret = expectedSecret;
@@ -67,7 +69,23 @@ final class FakeAiService implements AutoCloseable {
         ((java.util.concurrent.ExecutorService) server.getExecutor()).shutdownNow();
     }
 
+    private void handleCancel(HttpExchange exchange) throws IOException {
+        try {
+            String secret = exchange.getRequestHeaders().getFirst("X-Nexora-Internal-Secret");
+            String path = exchange.getRequestURI().getPath();
+            cancels.add(path.substring("/internal/v1/runs/".length(), path.length() - "/cancel".length())
+                    + (expectedSecret.equals(secret) ? "" : " (bad secret)"));
+            exchange.sendResponseHeaders(cancelStatus, -1);
+        } finally {
+            exchange.close();
+        }
+    }
+
     private void handle(HttpExchange exchange) throws IOException {
+        if (exchange.getRequestURI().getPath().endsWith("/cancel")) {
+            handleCancel(exchange);
+            return;
+        }
         requests.incrementAndGet();
         lastSecret = exchange.getRequestHeaders().getFirst("X-Nexora-Internal-Secret");
         lastContentType = exchange.getRequestHeaders().getFirst("Content-Type");

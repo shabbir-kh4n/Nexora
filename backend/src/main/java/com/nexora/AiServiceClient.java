@@ -25,6 +25,7 @@ public class AiServiceClient {
 
     private final HttpClient httpClient;
     private final RestClient restClient;
+    private final RestClient cancelClient;
     private final String secret;
 
     public AiServiceClient(NexoraProperties properties) {
@@ -37,11 +38,47 @@ public class AiServiceClient {
                 .baseUrl(properties.aiService().url().toString())
                 .requestFactory(new JdkClientHttpRequestFactory(httpClient))
                 .build();
+        // Unlike the stream, a cancel request is short, so it gets a read timeout of its own.
+        JdkClientHttpRequestFactory cancelFactory = new JdkClientHttpRequestFactory(httpClient);
+        cancelFactory.setReadTimeout(properties.aiService().connectTimeout());
+        this.cancelClient = RestClient.builder()
+                .baseUrl(properties.aiService().url().toString())
+                .requestFactory(cancelFactory)
+                .build();
         this.secret = properties.internal().sharedSecret();
     }
 
     Duration connectTimeout() {
         return httpClient.connectTimeout().orElseThrow();
+    }
+
+    // The Python endpoint is idempotent and treats an unknown or finished run as already cancelled.
+    void cancel(UUID runId) {
+        try {
+            cancelClient.post()
+                    .uri("/internal/v1/runs/{id}/cancel", runId.toString())
+                    .header(SECRET_HEADER, secret)
+                    .exchange((request, response) -> {
+                        int status = response.getStatusCode().value();
+                        if (status != 204) {
+                            throw new UpstreamException(rejectionCode(status));
+                        }
+                        return null;
+                    });
+        } catch (UpstreamException e) {
+            throw e;
+        } catch (RestClientException | IllegalStateException e) {
+            throw new UpstreamException(ErrorCode.UPSTREAM_UNAVAILABLE, e);
+        }
+    }
+
+    private static ErrorCode rejectionCode(int status) {
+        return switch (status) {
+            case 401 -> ErrorCode.INTERNAL_AUTH_FAILED;
+            // Java built the request, so a rejection means a defect on this side.
+            case 400 -> ErrorCode.INTERNAL_ERROR;
+            default -> ErrorCode.UPSTREAM_UNAVAILABLE;
+        };
     }
 
     // Blocks while the upstream stream is open. There is deliberately no read timeout here: the caller
@@ -75,15 +112,8 @@ public class AiServiceClient {
             Predicate<SseParser.Frame> onFrame)
             throws IOException {
         int status = response.getStatusCode().value();
-        if (status == 401) {
-            throw new UpstreamException(ErrorCode.INTERNAL_AUTH_FAILED);
-        }
-        if (status == 400) {
-            // Java built the request, so a rejection means a defect on this side.
-            throw new UpstreamException(ErrorCode.INTERNAL_ERROR);
-        }
         if (status != 200) {
-            throw new UpstreamException(ErrorCode.UPSTREAM_UNAVAILABLE);
+            throw new UpstreamException(rejectionCode(status));
         }
         MediaType contentType = response.getHeaders().getContentType();
         if (contentType == null || !contentType.isCompatibleWith(MediaType.TEXT_EVENT_STREAM)) {

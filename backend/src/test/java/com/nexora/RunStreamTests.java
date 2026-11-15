@@ -86,6 +86,20 @@ class RunStreamTests {
     }
 
     @Test
+    void closingEndsTheStreamAfterQueuedFramesWithoutATerminalFrame() throws Exception {
+        RunStream stream = new RunStream();
+        RecordingEmitter emitter = attached(stream);
+
+        stream.send("step", "{\"n\":1}");
+        stream.close();
+        stream.send("token", "{\"late\":true}");
+        stream.sendTerminal("done", "{}");
+
+        assertThat(emitter.awaitCompleted()).isTrue();
+        assertThat(emitter.frames).containsExactly(new SseParser.Frame("step", "{\"n\":1}"));
+    }
+
+    @Test
     void sendingWithNoBrowserAtAllNeverFails() {
         RunStream stream = new RunStream();
 

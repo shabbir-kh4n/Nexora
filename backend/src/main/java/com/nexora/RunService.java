@@ -2,6 +2,7 @@ package com.nexora;
 
 import java.time.Clock;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executor;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ScheduledExecutorService;
@@ -10,6 +11,7 @@ import java.util.concurrent.TimeUnit;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import tools.jackson.databind.json.JsonMapper;
 import tools.jackson.databind.node.ObjectNode;
@@ -29,6 +31,8 @@ public class RunService {
     private final Clock clock;
     private final Executor executor;
     private final ScheduledExecutorService scheduler;
+    // Runs that are queued or executing; the only way to reach a run's thread and browser stream.
+    private final ConcurrentHashMap<UUID, Execution> executions = new ConcurrentHashMap<>();
 
     public RunService(
             NexoraProperties properties,
@@ -61,12 +65,38 @@ public class RunService {
             registry.register(run);
             return new StartedRun(run, stream);
         }
+        Execution execution = new Execution(run, stream);
+        executions.put(run.id(), execution);
         try {
-            executor.execute(() -> new Execution(run, stream).run(question));
+            executor.execute(() -> execution.run(question));
         } catch (RejectedExecutionException e) {
+            executions.remove(run.id());
             fail(run, stream, ErrorCode.INTERNAL_ERROR);
         }
         return new StartedRun(run, stream);
+    }
+
+    public RunSnapshot snapshot(String runId) {
+        return find(runId).snapshot();
+    }
+
+    // Idempotent: only the call that wins the transition stops anything; every later call just reports the state.
+    public RunSnapshot cancel(String runId) {
+        Run run = find(runId);
+        if (run.cancel()) {
+            log.info("Run {} cancelled", run.id());
+            Execution execution = executions.get(run.id());
+            if (execution != null) {
+                execution.cancelled();
+            }
+        }
+        return run.snapshot();
+    }
+
+    private Run find(String runId) {
+        RunIds.require(runId);
+        return registry.find(UUID.fromString(runId))
+                .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, ErrorCode.RUN_NOT_FOUND));
     }
 
     // Only the caller whose transition wins reports the failure, so a run emits at most one terminal event.
@@ -90,7 +120,7 @@ public class RunService {
 
         private final Run run;
         private final RunStream stream;
-        private final Thread thread = Thread.currentThread();
+        private volatile Thread thread;
         private volatile long lastActivity = System.nanoTime();
         private volatile ScheduledFuture<?> idleCheck;
 
@@ -100,6 +130,39 @@ public class RunService {
         }
 
         void run(String question) {
+            // Set before the run can start, so a cancel that wins afterwards always finds the thread.
+            thread = Thread.currentThread();
+            try {
+                execute(question);
+            } finally {
+                executions.remove(run.id());
+            }
+        }
+
+        // Ends the browser stream without a terminal event, stops the reader and tells Python to stop.
+        void cancelled() {
+            stream.close();
+            Thread running = thread;
+            if (running == null) {
+                return;
+            }
+            running.interrupt();
+            try {
+                executor.execute(this::cancelUpstream);
+            } catch (RejectedExecutionException e) {
+                log.warn("Run {} upstream cancel was not sent: executor rejected it", run.id());
+            }
+        }
+
+        private void cancelUpstream() {
+            try {
+                client.cancel(run.id());
+            } catch (UpstreamException e) {
+                log.warn("Run {} upstream cancel failed: {}", run.id(), e.code());
+            }
+        }
+
+        private void execute(String question) {
             if (!run.start()) {
                 return;
             }

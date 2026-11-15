@@ -1,6 +1,8 @@
 package com.nexora;
 
 import java.time.Duration;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -26,5 +28,15 @@ class RunController {
         SseEmitter emitter = new SseEmitter(EMITTER_TIMEOUT.toMillis());
         started.stream().attach(emitter);
         return emitter;
+    }
+
+    @GetMapping("/{runId}")
+    RunSnapshot get(@PathVariable String runId) {
+        return runService.snapshot(runId);
+    }
+
+    @PostMapping("/{runId}/cancel")
+    RunSnapshot cancel(@PathVariable String runId) {
+        return runService.cancel(runId);
     }
 }
