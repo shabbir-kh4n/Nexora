@@ -6,7 +6,9 @@ info:
     S1 walking-skeleton contract. Unauthenticated, development-only and restricted to localhost.
     Run state is held in memory and is not durable. The event schemas are identical to the internal
     contract because Java relays Python events verbatim; a test keeps the two copies equal.
-    The shape of the run snapshot and of the cancel response is PROPOSED until the Java slice is reviewed.
+    Lifecycle: QUEUED, RUNNING, then COMPLETED, FAILED or CANCELLED. Terminal states are immutable, and a
+    late upstream event never overwrites one. No cancelled event exists; after a cancellation the client
+    reads the final state from the run snapshot.
 servers:
   - url: http://127.0.0.1:8080
 paths:
@@ -50,7 +52,7 @@ paths:
           $ref: "#/components/responses/Error"
   /api/v1/runs/{runId}:
     get:
-      summary: Run status and partial output
+      summary: Run status, accumulated output and steps
       parameters:
         - $ref: "#/components/parameters/RunId"
       responses:
@@ -60,21 +62,27 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/RunSnapshot"
+        "400":
+          $ref: "#/components/responses/Error"
         "404":
           $ref: "#/components/responses/Error"
   /api/v1/runs/{runId}/cancel:
     post:
       summary: Request cooperative cancellation
-      description: Idempotent. Partial output is preserved; a finished run is not changed.
+      description: >-
+        Idempotent. A QUEUED or RUNNING run becomes CANCELLED and keeps its partial output. A run that is
+        already CANCELLED, COMPLETED or FAILED is returned unchanged.
       parameters:
         - $ref: "#/components/parameters/RunId"
       responses:
         "200":
-          description: Snapshot of the run after the request.
+          description: Snapshot of the run after the request, with the same schema as GET.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/RunSnapshot"
+        "400":
+          $ref: "#/components/responses/Error"
         "404":
           $ref: "#/components/responses/Error"
 components:
@@ -105,7 +113,9 @@ components:
           maxLength: 2000
     RunSnapshot:
       type: object
-      required: [run_id, status, output]
+      description: >-
+        S1 scope. Sources and verification are not part of the S1 snapshot.
+      required: [run_id, status, output, steps, created_at, updated_at]
       additionalProperties: false
       properties:
         run_id:
@@ -116,7 +126,28 @@ components:
           enum: [QUEUED, RUNNING, COMPLETED, FAILED, CANCELLED]
         output:
           type: string
-          description: Answer text received so far.
+          description: Accumulated partial or final answer text.
+        steps:
+          type: array
+          description: Progress messages received so far, in order.
+          items:
+            type: object
+            required: [message]
+            additionalProperties: false
+            properties:
+              message:
+                type: string
+                minLength: 1
+        created_at:
+          type: string
+          format: date-time
+          pattern: "Z$"
+          description: ISO-8601 UTC.
+        updated_at:
+          type: string
+          format: date-time
+          pattern: "Z$"
+          description: ISO-8601 UTC.
     ErrorCode:
       type: string
       enum:

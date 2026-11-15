@@ -1,5 +1,11 @@
 {
   "run_id": "3f2b8c1e-5d4a-4c7e-9b1a-2e6f0a8d7c11",
   "status": "RUNNING",
-  "output": "This is a "
+  "output": "This is a ",
+  "steps": [
+    { "message": "Planning the research (simulated)" },
+    { "message": "Composing the answer (simulated)" }
+  ],
+  "created_at": "2026-11-15T10:00:00Z",
+  "updated_at": "2026-11-15T10:00:04Z"
 }

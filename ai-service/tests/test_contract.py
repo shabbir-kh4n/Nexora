@@ -15,6 +15,7 @@ FIXTURE_SCHEMAS = [
     ("heartbeat-event", "EventEnvelope"),
     ("error-event", "EventEnvelope"),
     ("error-response", "ErrorResponse"),
+    ("run-not-found-response", "ErrorResponse"),
 ]
 
 
@@ -35,6 +36,7 @@ def test_fixture_conforms_to_the_contract(spec_name: str, fixture: str, schema: 
         ("internal", "internal-run-request", "RunRequest"),
         ("public", "public-run-request", "RunRequest"),
         ("public", "run-snapshot", "RunSnapshot"),
+        ("public", "run-snapshot-cancelled", "RunSnapshot"),
     ],
 )
 def test_request_and_snapshot_fixtures_conform(spec_name: str, fixture: str, schema: str) -> None:
@@ -88,3 +90,60 @@ def test_live_error_responses_conform_to_the_error_schema() -> None:
         client.post("/internal/v1/runs", json={"question": ""}, headers=AUTH),
     ):
         validator.validate(response.json())
+
+
+def test_snapshot_rejects_malformed_snapshots() -> None:
+    validator = _validator(load_spec("public"), "RunSnapshot")
+    snapshot = load_fixture("run-snapshot")
+    bad_snapshots = [
+        {k: v for k, v in snapshot.items() if k != "steps"},
+        {k: v for k, v in snapshot.items() if k != "updated_at"},
+        {**snapshot, "status": "PAUSED"},
+        {**snapshot, "steps": [{"message": "ok", "extra": 1}]},
+        {**snapshot, "steps": [{}]},
+        {**snapshot, "steps": "none"},
+        {**snapshot, "created_at": "2026-11-15T10:00:00+05:30"},
+        {**snapshot, "sources": []},
+        {**snapshot, "verification": {}},
+    ]
+
+    for bad in bad_snapshots:
+        assert not validator.is_valid(bad), bad
+
+
+def test_get_and_cancel_return_the_same_snapshot_schema_with_the_error_envelope() -> None:
+    paths = load_spec("public")["paths"]
+    get = paths["/api/v1/runs/{runId}"]["get"]["responses"]
+    cancel = paths["/api/v1/runs/{runId}/cancel"]["post"]["responses"]
+    snapshot_ref = {"$ref": "#/components/schemas/RunSnapshot"}
+    error_ref = {"$ref": "#/components/responses/Error"}
+
+    assert get["200"]["content"]["application/json"]["schema"] == snapshot_ref
+    assert cancel["200"]["content"]["application/json"]["schema"] == snapshot_ref
+    for responses in (get, cancel):
+        assert responses["400"] == error_ref and responses["404"] == error_ref
+
+
+def test_snapshot_lifecycle_is_the_approved_s1_set() -> None:
+    schema = load_spec("public")["components"]["schemas"]["RunSnapshot"]
+
+    assert schema["properties"]["status"]["enum"] == ["QUEUED", "RUNNING", "COMPLETED", "FAILED", "CANCELLED"]
+    assert set(schema["properties"]) == {"run_id", "status", "output", "steps", "created_at", "updated_at"}
+
+
+def test_a_snapshot_can_be_built_from_the_live_event_stream() -> None:
+    frames = parse_sse(client.post("/internal/v1/runs", json=RUN_BODY, headers=AUTH).text)
+    envelopes = [envelope for _, envelope in frames]
+
+    snapshot = {
+        "run_id": RUN_BODY["run_id"],
+        "status": "COMPLETED" if envelopes[-1]["type"] == "done" else "FAILED",
+        "output": "".join(e["data"]["text"] for e in envelopes if e["type"] == "token"),
+        "steps": [{"message": e["data"]["message"]} for e in envelopes if e["type"] == "step"],
+        "created_at": envelopes[0]["timestamp"],
+        "updated_at": envelopes[-1]["timestamp"],
+    }
+
+    _validator(load_spec("public"), "RunSnapshot").validate(snapshot)
+    assert snapshot["output"] == "This is a simulated answer."
+    assert len(snapshot["steps"]) == 2
