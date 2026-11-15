@@ -21,3 +21,9 @@ nexora:
   internal:
     # Shared secret for Java -> Python calls. No default on purpose.
     shared-secret: ${NEXORA_INTERNAL_SHARED_SECRET:}
+  run:
+    max-duration: ${NEXORA_RUN_MAX_DURATION:PT3M}
+    heartbeat-interval: ${NEXORA_HEARTBEAT_INTERVAL:PT15S}
+    terminal-retention: ${NEXORA_TERMINAL_RETENTION:PT1H}
+    upstream-heartbeat-timeout: ${NEXORA_UPSTREAM_HEARTBEAT_TIMEOUT:PT40S}
+    max-active-runs: ${NEXORA_MAX_ACTIVE_RUNS:10}

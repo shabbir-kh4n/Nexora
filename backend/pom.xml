@@ -42,6 +42,16 @@
   </dependencies>
 
   <build>
+    <testResources>
+      <testResource>
+        <directory>src/test/resources</directory>
+      </testResource>
+      <!-- Puts the shared contract files on the test classpath, so tests do not depend on the working directory. -->
+      <testResource>
+        <directory>${project.basedir}/../docs/openapi</directory>
+        <targetPath>openapi</targetPath>
+      </testResource>
+    </testResources>
     <plugins>
       <plugin>
         <groupId>org.springframework.boot</groupId>
