@@ -1,0 +1,6 @@
+{
+  "error": {
+    "code": "INTERNAL_AUTH_FAILED",
+    "message": "Internal authentication failed."
+  }
+}

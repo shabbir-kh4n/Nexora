@@ -1,0 +1,8 @@
+{
+  "version": "1",
+  "event_id": "7d9f1c52-0a4e-4b8e-8d3a-5c2e9b6f1a01",
+  "run_id": "3f2b8c1e-5d4a-4c7e-9b1a-2e6f0a8d7c11",
+  "type": "step",
+  "timestamp": "2026-11-15T10:00:00Z",
+  "data": { "message": "Planning the research (simulated)" }
+}
