@@ -3,11 +3,12 @@ import uuid
 
 import httpx
 import pytest
+from fastapi.responses import StreamingResponse
 from fastapi.testclient import TestClient
 
 from app import runs
 from app.main import app
-from helpers import AUTH, RUN_BODY, RUN_ID, parse_sse
+from helpers import AUTH, RUN_BODY, RUN_ID, drive, parse_sse
 
 client = TestClient(app)
 SCRIPT_LENGTH = len(runs._SCRIPT)
@@ -126,4 +127,71 @@ def test_a_run_id_that_is_already_streaming_is_rejected(monkeypatch: pytest.Monk
 
     assert duplicate.status_code == 400
     assert duplicate.json()["error"]["code"] == "INVALID_REQUEST"
+    assert runs._active == {}
+
+
+async def _new_run() -> StreamingResponse:
+    return await runs.create_run(runs.RunRequest(run_id=RUN_ID, question="q"))
+
+
+def test_cancel_before_the_first_event_emits_nothing_and_frees_the_run(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("NEXORA_FAKE_EVENT_DELAY_SECONDS", "0.3")
+
+    async def scenario() -> list[str]:
+        response = await _new_run()
+        await runs.cancel_run(RUN_ID)
+        return await drive(response)
+
+    assert asyncio.run(scenario()) == []
+    assert runs._active == {}
+
+
+def test_client_disconnect_mid_stream_stops_the_run_and_frees_it(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("NEXORA_FAKE_EVENT_DELAY_SECONDS", "0.3")
+
+    async def scenario() -> list[str]:
+        return await drive(await _new_run(), disconnect_after=0.5)
+
+    events = asyncio.run(scenario())
+
+    assert 0 < len(events) < SCRIPT_LENGTH
+    assert "done" not in events
+    assert runs._active == {}
+
+
+def test_client_disconnect_before_streaming_starts_frees_the_run() -> None:
+    async def scenario() -> list[str]:
+        return await drive(await _new_run(), disconnect_after=0.1, block_start=True)
+
+    assert asyncio.run(scenario()) == []
+    assert runs._active == {}
+    assert client.post("/internal/v1/runs", json=RUN_BODY, headers=AUTH).status_code == 200
+
+
+def test_cancelling_unknown_runs_does_not_grow_state() -> None:
+    for _ in range(50):
+        assert client.post(f"/internal/v1/runs/{uuid.uuid4()}/cancel", headers=AUTH).status_code == 204
+
+    assert runs._active == {}
+
+
+def test_two_cancels_while_streaming_both_succeed(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("NEXORA_FAKE_EVENT_DELAY_SECONDS", "0.3")
+
+    async def scenario() -> list[httpx.Response]:
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as http:
+
+            async def cancel(after: float) -> httpx.Response:
+                await asyncio.sleep(after)
+                return await http.post(CANCEL_URL, headers=AUTH)
+
+            return await asyncio.gather(
+                http.post("/internal/v1/runs", json=RUN_BODY, headers=AUTH), cancel(0.45), cancel(0.5)
+            )
+
+    run, first, second = asyncio.run(scenario())
+
+    assert first.status_code == second.status_code == 204
+    assert "done" not in [event for event, _ in parse_sse(run.text)]
     assert runs._active == {}

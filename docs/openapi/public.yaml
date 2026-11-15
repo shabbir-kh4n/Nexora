@@ -3,11 +3,13 @@ info:
   title: Nexora public API (React to Java)
   version: 0.1.0
   description: >-
-    S1 walking-skeleton contract. Unauthenticated, development-only and restricted to localhost.
+    Initial walking-skeleton contract. Unauthenticated, development-only and restricted to localhost.
     Run state is held in memory and is not durable. The event schemas are identical to the internal
     contract because Java relays Python events verbatim; a test keeps the two copies equal.
-    Lifecycle: QUEUED, RUNNING, then COMPLETED, FAILED or CANCELLED. Terminal states are immutable, and a
-    late upstream event never overwrites one. No cancelled event exists; after a cancellation the client
+    Lifecycle: QUEUED, RUNNING, then COMPLETED, FAILED or CANCELLED. A run becomes RUNNING when the Java
+    executor starts processing it, before the AI service is called, and may go from QUEUED straight to
+    FAILED when execution cannot start. Terminal states are immutable, and a late upstream event never
+    overwrites one. No cancelled event exists; after a cancellation the client
     reads the final state from the run snapshot.
 servers:
   - url: http://127.0.0.1:8080
@@ -92,8 +94,7 @@ components:
       in: path
       required: true
       schema:
-        type: string
-        format: uuid
+        $ref: "#/components/schemas/RunId"
   responses:
     Error:
       description: Error envelope.
@@ -102,6 +103,15 @@ components:
           schema:
             $ref: "#/components/schemas/ErrorResponse"
   schemas:
+    RunId:
+      type: string
+      format: uuid
+      minLength: 36
+      maxLength: 36
+      pattern: "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+      description: >-
+        Canonical lower-case dashed UUID, as produced by Java's UUID.toString(). Uppercase, braces,
+        missing dashes and URN prefixes are rejected, and ids are never matched case-insensitively.
     RunRequest:
       type: object
       required: [question]
@@ -114,13 +124,22 @@ components:
     RunSnapshot:
       type: object
       description: >-
-        S1 scope. Sources and verification are not part of the S1 snapshot.
+        Sources and verification are not part of this snapshot yet. The `error` object is required when
+        the status is FAILED and must be absent for every other status.
       required: [run_id, status, output, steps, created_at, updated_at]
       additionalProperties: false
+      if:
+        properties:
+          status:
+            const: FAILED
+      then:
+        required: [error]
+      else:
+        not:
+          required: [error]
       properties:
         run_id:
-          type: string
-          format: uuid
+          $ref: "#/components/schemas/RunId"
         status:
           type: string
           enum: [QUEUED, RUNNING, COMPLETED, FAILED, CANCELLED]
@@ -148,6 +167,11 @@ components:
           format: date-time
           pattern: "Z$"
           description: ISO-8601 UTC.
+        error:
+          $ref: "#/components/schemas/ErrorResponse/properties/error"
+          description: >-
+            Why the run failed. Stable code and a generic, user-safe message; never exception details,
+            internal URLs, credentials or stack traces.
     ErrorCode:
       type: string
       enum:
@@ -182,8 +206,7 @@ components:
           type: string
           format: uuid
         run_id:
-          type: string
-          format: uuid
+          $ref: "#/components/schemas/RunId"
         timestamp:
           type: string
           format: date-time

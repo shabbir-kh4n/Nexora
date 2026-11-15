@@ -1,9 +1,21 @@
+from collections.abc import Callable
+from typing import Any
+
 import pytest
 from fastapi.testclient import TestClient
+from jsonschema import Draft202012Validator
 from openapi_spec_validator import validate
 
 from app.main import app
-from helpers import AUTH, RUN_BODY, load_fixture, load_spec, parse_sse
+from helpers import (
+    ACCEPTED_RUN_IDS,
+    AUTH,
+    REJECTED_RUN_IDS,
+    RUN_BODY,
+    load_fixture,
+    load_spec,
+    parse_sse,
+)
 from helpers import schema_validator as _validator
 
 client = TestClient(app)
@@ -37,6 +49,7 @@ def test_fixture_conforms_to_the_contract(spec_name: str, fixture: str, schema: 
         ("public", "public-run-request", "RunRequest"),
         ("public", "run-snapshot", "RunSnapshot"),
         ("public", "run-snapshot-cancelled", "RunSnapshot"),
+        ("public", "run-snapshot-failed", "RunSnapshot"),
     ],
 )
 def test_request_and_snapshot_fixtures_conform(spec_name: str, fixture: str, schema: str) -> None:
@@ -48,7 +61,7 @@ def test_event_schemas_are_identical_in_both_contracts() -> None:
     public = load_spec("public")["components"]["schemas"]
     shared = [
         "EventBase", "StepEvent", "TokenEvent", "DoneEvent", "HeartbeatEvent",
-        "ErrorEvent", "EventEnvelope", "ErrorCode", "ErrorResponse",
+        "ErrorEvent", "EventEnvelope", "ErrorCode", "ErrorResponse", "RunId",
     ]  # fmt: skip
 
     for name in shared:
@@ -128,7 +141,54 @@ def test_snapshot_lifecycle_is_the_approved_s1_set() -> None:
     schema = load_spec("public")["components"]["schemas"]["RunSnapshot"]
 
     assert schema["properties"]["status"]["enum"] == ["QUEUED", "RUNNING", "COMPLETED", "FAILED", "CANCELLED"]
-    assert set(schema["properties"]) == {"run_id", "status", "output", "steps", "created_at", "updated_at"}
+    assert set(schema["properties"]) == {
+        "run_id", "status", "output", "steps", "created_at", "updated_at", "error",
+    }  # fmt: skip
+    assert schema["required"] == ["run_id", "status", "output", "steps", "created_at", "updated_at"]
+
+
+@pytest.mark.parametrize("status", ["QUEUED", "RUNNING", "COMPLETED", "CANCELLED"])
+def test_snapshot_error_is_only_allowed_when_the_run_failed(status: str) -> None:
+    validator = _validator(load_spec("public"), "RunSnapshot")
+    failed = load_fixture("run-snapshot-failed")
+
+    assert validator.is_valid(failed)
+    assert not validator.is_valid({**failed, "status": status})
+    assert validator.is_valid({k: v for k, v in failed.items() if k != "error"} | {"status": status})
+
+
+def test_a_failed_snapshot_requires_the_error_object() -> None:
+    validator = _validator(load_spec("public"), "RunSnapshot")
+    failed = load_fixture("run-snapshot-failed")
+
+    assert validator.is_valid(failed)
+    assert not validator.is_valid({k: v for k, v in failed.items() if k != "error"})
+
+
+def test_snapshot_error_object_is_strict() -> None:
+    validator = _validator(load_spec("public"), "RunSnapshot")
+    failed = load_fixture("run-snapshot-failed")
+    bad_errors = [
+        {},
+        {"code": "NOT_A_CODE", "message": "x"},
+        {"code": "UPSTREAM_UNAVAILABLE"},
+        {"message": "x"},
+        {"code": "UPSTREAM_UNAVAILABLE", "message": "x", "detail": "trace"},
+        "UPSTREAM_UNAVAILABLE",
+        None,
+    ]
+
+    for error in bad_errors:
+        assert not validator.is_valid({**failed, "error": error}), error
+
+
+@pytest.mark.parametrize("name", ["run-snapshot-failed", "error-event", "error-response", "run-not-found-response"])
+def test_error_fixtures_use_generic_user_safe_messages(name: str) -> None:
+    fixture = load_fixture(name)
+    error = fixture.get("error") or fixture["data"]
+
+    for forbidden in ("://", "Exception", "Traceback", "localhost", "127.0.0.1", "secret", "File \""):
+        assert forbidden not in error["message"], forbidden
 
 
 def test_a_snapshot_can_be_built_from_the_live_event_stream() -> None:
@@ -147,3 +207,78 @@ def test_a_snapshot_can_be_built_from_the_live_event_stream() -> None:
     _validator(load_spec("public"), "RunSnapshot").validate(snapshot)
     assert snapshot["output"] == "This is a simulated answer."
     assert len(snapshot["steps"]) == 2
+
+
+@pytest.mark.parametrize("fixture", ["run-snapshot", "run-snapshot-cancelled", "run-snapshot-failed"])
+def test_every_snapshot_fixture_matches_the_failed_only_error_rule(fixture: str) -> None:
+    snapshot = load_fixture(fixture)
+
+    assert ("error" in snapshot) == (snapshot["status"] == "FAILED")
+
+
+def test_the_snapshot_reuses_the_shared_error_schema_and_code_list() -> None:
+    schemas = load_spec("public")["components"]["schemas"]
+
+    assert schemas["RunSnapshot"]["properties"]["error"]["$ref"] == "#/components/schemas/ErrorResponse/properties/error"
+    assert schemas["ErrorResponse"]["properties"]["error"]["properties"]["code"] == {
+        "$ref": "#/components/schemas/ErrorCode"
+    }
+
+
+RUN_ID_REF = {"$ref": "#/components/schemas/RunId"}
+
+
+def test_run_id_locations_all_use_the_shared_schema() -> None:
+    internal, public = load_spec("internal"), load_spec("public")
+
+    assert public["components"]["parameters"]["RunId"]["schema"] == RUN_ID_REF
+    assert public["components"]["schemas"]["RunSnapshot"]["properties"]["run_id"] == RUN_ID_REF
+    assert internal["paths"]["/internal/v1/runs/{runId}/cancel"]["post"]["parameters"][0]["schema"] == RUN_ID_REF
+    assert internal["components"]["schemas"]["RunRequest"]["properties"]["run_id"] == RUN_ID_REF
+    for spec in (internal, public):
+        assert spec["components"]["schemas"]["EventBase"]["properties"]["run_id"] == RUN_ID_REF
+
+
+def test_the_run_id_schema_is_the_canonical_lower_case_uuid() -> None:
+    schema = load_spec("public")["components"]["schemas"]["RunId"]
+
+    assert schema["format"] == "uuid"
+    assert schema["minLength"] == schema["maxLength"] == 36
+    assert schema["pattern"] == "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+
+
+def _run_id_validators() -> dict[str, tuple[Draft202012Validator, Callable[[str], Any]]]:
+    internal, public = load_spec("internal"), load_spec("public")
+    snapshot = load_fixture("run-snapshot")
+    event = load_fixture("step-event")
+    return {
+        "internal run request": (_validator(internal, "RunRequest"), lambda v: load_fixture("internal-run-request") | {"run_id": v}),
+        "internal event": (_validator(internal, "EventEnvelope"), lambda v: event | {"run_id": v}),
+        "public run id (path parameter)": (_validator(public, "RunId"), lambda v: v),
+        "public run snapshot": (_validator(public, "RunSnapshot"), lambda v: snapshot | {"run_id": v}),
+        "public event": (_validator(public, "EventEnvelope"), lambda v: event | {"run_id": v}),
+    }
+
+
+@pytest.mark.parametrize("location", list(_run_id_validators()))
+@pytest.mark.parametrize("run_id", ACCEPTED_RUN_IDS)
+def test_every_run_id_location_accepts_canonical_ids(location: str, run_id: str) -> None:
+    validator, build = _run_id_validators()[location]
+
+    assert validator.is_valid(build(run_id))
+
+
+@pytest.mark.parametrize("location", list(_run_id_validators()))
+@pytest.mark.parametrize("run_id", REJECTED_RUN_IDS)
+def test_every_run_id_location_rejects_non_canonical_ids(location: str, run_id: str) -> None:
+    validator, build = _run_id_validators()[location]
+
+    assert not validator.is_valid(build(run_id))
+
+
+def test_failed_snapshot_with_a_non_canonical_run_id_is_still_rejected() -> None:
+    validator = _validator(load_spec("public"), "RunSnapshot")
+    failed = load_fixture("run-snapshot-failed")
+
+    assert validator.is_valid(failed)
+    assert not validator.is_valid(failed | {"run_id": failed["run_id"].upper()})
