@@ -111,6 +111,7 @@ components:
         - UPSTREAM_STREAM_INVALID
         - UPSTREAM_STREAM_TRUNCATED
         - RUN_TIMEOUT
+        - RUN_CAPACITY_EXCEEDED
         - INTERNAL_ERROR
     ErrorResponse:
       type: object

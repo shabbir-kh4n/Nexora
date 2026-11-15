@@ -17,6 +17,7 @@ class NexoraPropertiesDefaultsTests {
     @Test
     void approvedDefaultsComeFromApplicationYaml() {
         assertThat(properties.aiService().url()).isEqualTo(URI.create("http://127.0.0.1:8000"));
+        assertThat(properties.aiService().connectTimeout()).isEqualTo(Duration.ofSeconds(5));
         assertThat(properties.run().maxDuration()).isEqualTo(Duration.ofMinutes(3));
         assertThat(properties.run().heartbeatInterval()).isEqualTo(Duration.ofSeconds(15));
         assertThat(properties.run().upstreamHeartbeatTimeout()).isEqualTo(Duration.ofSeconds(40));

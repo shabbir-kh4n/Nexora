@@ -37,6 +37,8 @@ paths:
         `done` and `error` are terminal and nothing follows them. After a cancellation the stream ends
         without a terminal event and the client reads CANCELLED from `GET /api/v1/runs/{runId}`.
         A `heartbeat` event is sent every 15 seconds while the stream is idle.
+        When the service is at capacity the response is still 200: the stream carries a single `error` event with
+        `RUN_CAPACITY_EXCEEDED`, and the run is recorded as FAILED.
       requestBody:
         required: true
         content:
@@ -182,6 +184,7 @@ components:
         - UPSTREAM_STREAM_INVALID
         - UPSTREAM_STREAM_TRUNCATED
         - RUN_TIMEOUT
+        - RUN_CAPACITY_EXCEEDED
         - INTERNAL_ERROR
     ErrorResponse:
       type: object

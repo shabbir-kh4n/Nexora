@@ -238,6 +238,12 @@ class ContractDtoTests {
         assertThat(ErrorCode.RUN_TIMEOUT.message()).isEqualTo("The run exceeded the maximum allowed time.");
     }
 
+    @Test
+    void capacityExceededHasTheApprovedMessage() {
+        assertThat(ErrorCode.RUN_CAPACITY_EXCEEDED.message())
+                .isEqualTo("Nexora is currently at capacity. Please try again shortly.");
+    }
+
     record Tolerant(String a) {
     }
 

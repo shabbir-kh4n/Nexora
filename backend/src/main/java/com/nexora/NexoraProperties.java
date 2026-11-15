@@ -11,7 +11,7 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
 public record NexoraProperties(
         @DefaultValue AiService aiService, @DefaultValue Internal internal, @DefaultValue Run run) {
 
-    public record AiService(URI url) {
+    public record AiService(URI url, Duration connectTimeout) {
 
         public AiService {
             boolean httpUrl = url != null && url.getHost() != null
@@ -19,6 +19,8 @@ public record NexoraProperties(
             // Credentials in a URL would leak through toString and binding errors; the secret has its own header.
             require(httpUrl && url.getUserInfo() == null,
                     "nexora.ai-service.url must be an absolute http or https URL without credentials");
+            require(connectTimeout != null && connectTimeout.isPositive(),
+                    "nexora.ai-service.connect-timeout must be a positive duration");
         }
     }
 

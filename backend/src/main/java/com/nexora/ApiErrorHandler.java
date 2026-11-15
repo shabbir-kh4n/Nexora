@@ -3,6 +3,7 @@ package com.nexora;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.HttpMediaTypeNotSupportedException;
@@ -43,6 +44,7 @@ class ApiErrorHandler {
     }
 
     private static ResponseEntity<ErrorResponse> respond(HttpStatus status, ErrorCode code) {
-        return ResponseEntity.status(status).body(ErrorResponse.of(code));
+        // Explicit so an error still renders as JSON when the client asked for text/event-stream.
+        return ResponseEntity.status(status).contentType(MediaType.APPLICATION_JSON).body(ErrorResponse.of(code));
     }
 }

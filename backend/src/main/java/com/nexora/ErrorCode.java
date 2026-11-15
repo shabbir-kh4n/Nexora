@@ -8,6 +8,7 @@ public enum ErrorCode {
     UPSTREAM_STREAM_INVALID("The AI service returned an invalid response."),
     UPSTREAM_STREAM_TRUNCATED("The AI service stream ended before the run finished."),
     RUN_TIMEOUT("The run exceeded the maximum allowed time."),
+    RUN_CAPACITY_EXCEEDED("Nexora is currently at capacity. Please try again shortly."),
     INTERNAL_ERROR("An internal error occurred.");
 
     private final String message;

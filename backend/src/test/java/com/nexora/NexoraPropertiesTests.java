@@ -22,6 +22,7 @@ class NexoraPropertiesTests {
 
     private static final Map<String, String> VALID = Map.of(
             "nexora.ai-service.url", "http://127.0.0.1:8000",
+            "nexora.ai-service.connect-timeout", "PT5S",
             "nexora.internal.shared-secret", SECRET,
             "nexora.run.max-duration", "PT3M",
             "nexora.run.heartbeat-interval", "PT15S",
@@ -61,6 +62,7 @@ class NexoraPropertiesTests {
             assertThat(context).hasNotFailed();
             NexoraProperties properties = context.getBean(NexoraProperties.class);
             assertThat(properties.aiService().url()).isEqualTo(URI.create("http://127.0.0.1:8000"));
+            assertThat(properties.aiService().connectTimeout()).isEqualTo(Duration.ofSeconds(5));
             assertThat(properties.run().maxDuration()).isEqualTo(Duration.ofMinutes(3));
             assertThat(properties.run().heartbeatInterval()).isEqualTo(Duration.ofSeconds(15));
             assertThat(properties.run().upstreamHeartbeatTimeout()).isEqualTo(Duration.ofSeconds(40));
@@ -106,7 +108,11 @@ class NexoraPropertiesTests {
                 Arguments.of("nexora.ai-service.url", "", "nexora.ai-service.url"),
                 Arguments.of("nexora.ai-service.url", "/relative/path", "nexora.ai-service.url"),
                 Arguments.of("nexora.ai-service.url", "ftp://127.0.0.1", "nexora.ai-service.url"),
-                Arguments.of("nexora.ai-service.url", "http://user:pa55word@127.0.0.1:8000", "nexora.ai-service.url"));
+                Arguments.of("nexora.ai-service.url", "http://user:pa55word@127.0.0.1:8000", "nexora.ai-service.url"),
+                Arguments.of("nexora.ai-service.connect-timeout", null, "nexora.ai-service.connect-timeout"),
+                Arguments.of("nexora.ai-service.connect-timeout", "", "nexora.ai-service.connect-timeout"),
+                Arguments.of("nexora.ai-service.connect-timeout", "PT0S", "nexora.ai-service.connect-timeout"),
+                Arguments.of("nexora.ai-service.connect-timeout", "-PT2S", "nexora.ai-service.connect-timeout"));
     }
 
     @Test

@@ -18,6 +18,7 @@ nexora:
   ai-service:
     # Internal Java -> Python base URL. The Python service is internal-only.
     url: ${NEXORA_AI_SERVICE_URL:http://127.0.0.1:8000}
+    connect-timeout: ${NEXORA_AI_SERVICE_CONNECT_TIMEOUT:PT5S}
   internal:
     # Shared secret for Java -> Python calls. No default on purpose.
     shared-secret: ${NEXORA_INTERNAL_SHARED_SECRET:}
