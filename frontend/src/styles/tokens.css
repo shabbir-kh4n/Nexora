@@ -1,0 +1,74 @@
+:root {
+  color-scheme: light;
+
+  --bg: #ffffff;
+  --sidebar-bg: #f9f9f9;
+  --card: #ffffff;
+  --surface-sunken: #f9f9f9;
+  --surface-hover: #f2f2f2;
+  --border: #e5e5e5;
+  --border-strong: #d4d4d4;
+
+  --text: #171717;
+  --text-muted: #737373;
+  /* Decoration only (list markers); text never uses it because it falls below 4.5:1. */
+  --text-faint: #a3a3a3;
+
+  --accent: #171717;
+  --accent-hover: #2e2e2e;
+  --on-accent: #ffffff;
+
+  /* Errors are the only coloured element: colour is reserved for a state that needs attention. */
+  --danger: #b42318;
+
+  --overlay: rgb(0 0 0 / 0.25);
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --space-7: 48px;
+
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-pill: 28px;
+
+
+  --font-sans: "Inter", ui-sans-serif, system-ui, "Segoe UI Variable Text", "Segoe UI", Roboto, sans-serif;
+  --font-mono: ui-monospace, "Cascadia Code", "SF Mono", Menlo, Consolas, monospace;
+
+  --sidebar-width: 268px;
+  --rail-width: 64px;
+  --content-width: 720px;
+  --ease: cubic-bezier(0.2, 0, 0, 1);
+  --duration: 140ms;
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  --bg: #212121;
+  --sidebar-bg: #171717;
+  --card: #262626;
+  --surface-sunken: #171717;
+  --surface-hover: #303030;
+  --border: #303030;
+  --border-strong: #454545;
+
+  --text: #ececec;
+  --text-muted: #a1a1aa;
+  --text-faint: #71717a;
+
+  --accent: #ececec;
+  --accent-hover: #ffffff;
+  --on-accent: #171717;
+
+  --danger: #f97066;
+
+  --overlay: rgb(0 0 0 / 0.55);
+  --shadow-sm: 0 1px 2px rgb(0 0 0 / 0.3);
+  --shadow-md: 0 2px 12px rgb(0 0 0 / 0.35);
+}

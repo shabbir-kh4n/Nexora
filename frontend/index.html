@@ -3,7 +3,20 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light dark" />
     <title>Nexora</title>
+    <script>
+      // Runs before first paint so a saved theme never flashes. Keep in sync with src/lib/theme.ts.
+      (function () {
+        var preference = "system";
+        try {
+          var stored = localStorage.getItem("nexora-theme");
+          if (stored === "light" || stored === "dark") preference = stored;
+        } catch (e) {}
+        var dark = preference === "dark" || (preference === "system" && matchMedia("(prefers-color-scheme: dark)").matches);
+        document.documentElement.dataset.theme = dark ? "dark" : "light";
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>
